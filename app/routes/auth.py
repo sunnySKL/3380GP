@@ -1,6 +1,7 @@
 import os
 import requests
 from flask import Blueprint, redirect, url_for, session, flash, request
+from app.models import User
 
 auth = Blueprint('auth', __name__)
 
@@ -8,7 +9,7 @@ auth = Blueprint('auth', __name__)
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID")
-REDIRECT_URI = os.getenv("REDIRECT_URI")
+#REDIRECT_URI = os.getenv("REDIRECT_URI")
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize"
 TOKEN_URL = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 SCOPE = ["User.Read"]
@@ -16,13 +17,16 @@ SCOPE = ["User.Read"]
 @auth.route("/login")
 def microsoft_login():
     if "user" in session:
-        #print("[DEBUG] User already in session, redirecting to dashboard...")
+        print(session)
+        print("[DEBUG] User already in session, redirecting to dashboard...")
         return redirect(url_for("admin.dashboard"))  # Prevents re-login loop
 
     #print("[DEBUG] Redirecting user to Microsoft login...")
+    redirect_uri = url_for('auth.microsoft_callback', _external=True)
+    print(f"Generated redirect uri: {redirect_uri}")
     login_url = (
         f"{AUTHORITY}?client_id={CLIENT_ID}"
-        f"&response_type=code&redirect_uri={REDIRECT_URI}"
+        f"&response_type=code&redirect_uri={redirect_uri}"
         f"&scope={' '.join(SCOPE)}"
     )
     return redirect(login_url)
@@ -36,13 +40,15 @@ def microsoft_callback():
         flash("Login failed. No authorization code received.", "error")
         return redirect(url_for('main.home'))
 
+    redirect_uri = url_for('auth.microsoft_callback', _external=True)
+
     # Exchange code for access token
     token_data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "scope": " ".join(SCOPE),
     }
     response = requests.post(TOKEN_URL, data=token_data)
@@ -62,18 +68,28 @@ def microsoft_callback():
     session["user"] = user_info.get("displayName", "Unknown User")
     session["email"] = user_info.get("mail", "No Email Provided")
 
+    #curr_admins = ["hkliu@cougarnet.uh.edu", "eesenvar@cougarnet.uh.edu"] 
     #  Assign admin role if email matches yours
-    if session["email"].lower() == "hkliu@cougarnet.uh.edu":
+    flash(f"Welcome, {session['user']}!", "success")
+
+    user = User.query.filter_by(email=session["email"].lower()).first()
+
+    #if session["email"].lower() in curr_admins:
+    if user.role.lower() == "admin":
         session["role"] = "Admin"
+        return redirect(url_for('admin.dashboard'))
     else:
         session["role"] = "User"
+        return redirect(url_for('main.dashboard'))
 
-    flash(f"Welcome, {session['user']}!", "success")
-    return redirect(url_for('admin.dashboard'))
+    #flash(f"Welcome, {session['user']}!", "success")
+    #return redirect(url_for('admin.dashboard'))
 
 @auth.route('/logout')
 def logout():
     session.clear()
+    ms_logout_url = "https://login.microsoftonline.com/common/oauth2/logout?post_logout_redirect_uri=" + url_for('main.home', _external=True)
+    redirect
     print("[DEBUG] User session cleared")
     flash("You have been logged out.", "success")
-    return redirect(url_for('main.home'))
+    return redirect(ms_logout_url)
